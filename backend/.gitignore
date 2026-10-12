@@ -1,0 +1,24 @@
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+maporaa.db
+
+# Storage
+uploads/*
+!uploads/.gitkeep
+artifacts/*
+!artifacts/.gitkeep
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
