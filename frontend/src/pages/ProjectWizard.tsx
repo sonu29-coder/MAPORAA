@@ -1,16 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Box, Container, Typography, TextField, Button, Card, CardContent,
-  Alert, LinearProgress, Stack, Stepper, Step, StepLabel, Grid, Chip
+  Alert, LinearProgress, Stack, Stepper, Step, StepLabel, Grid, Chip,
+  List, ListItem, ListItemIcon, ListItemText, ListItemSecondaryAction,
+  IconButton, Tooltip
 } from '@mui/material';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
 import {
   UploadCloud, FileVideo, CheckCircle2, Play, AlertCircle,
-  X, RefreshCw, ArrowRight, ArrowLeft
+  X, RefreshCw, ArrowRight, ArrowLeft, Files, Check, AlertTriangle
 } from 'lucide-react';
 
-const STEPS = ['Project Details', 'Select Video', 'Upload & Validate', 'Review & Reconstruct'];
+const STEPS = ['Project Details', 'Select Videos', 'Upload & Validate', 'Review & Reconstruct'];
+
+interface SelectedFileItem {
+  file: File;
+  id: string;
+  previewUrl?: string;
+  status?: 'pending' | 'uploading' | 'success' | 'error';
+  errorMessage?: string;
+  uploadedData?: any;
+}
 
 export const ProjectWizard: React.FC = () => {
   const navigate = useNavigate();
@@ -25,13 +36,12 @@ export const ProjectWizard: React.FC = () => {
   const [creatingProject, setCreatingProject] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
 
-  // Step 2 & 3: Video File Selection & Validation
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Step 2 & 3: Video File Selection & Batch Validation
+  const [selectedFiles, setSelectedFiles] = useState<SelectedFileItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadedVideo, setUploadedVideo] = useState<any | null>(null);
+  const [uploadedVideos, setUploadedVideos] = useState<any[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -43,7 +53,7 @@ export const ProjectWizard: React.FC = () => {
           setProjectName(res.data.name);
           setProjectDesc(res.data.description || '');
           if (res.data.videos && res.data.videos.length > 0) {
-            setUploadedVideo(res.data.videos[res.data.videos.length - 1]);
+            setUploadedVideos(res.data.videos);
             setActiveStep(3);
           }
         })
@@ -51,12 +61,14 @@ export const ProjectWizard: React.FC = () => {
     }
   }, [existingProjectId]);
 
-  // Clean up object URL when component unmounts or file changes
+  // Clean up object URLs when unmounting
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      selectedFiles.forEach((item) => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      });
     };
-  }, [previewUrl]);
+  }, [selectedFiles]);
 
   // Step 1: Submit Project Info
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -82,54 +94,66 @@ export const ProjectWizard: React.FC = () => {
     }
   };
 
-  // Step 2: Handle File Drop / Select
-  const handleFileSelect = (file: File) => {
+  // Step 2: Handle File Drop / Select (supports single or multiple)
+  const addFiles = (files: FileList | File[]) => {
     setUploadError(null);
     const validExtensions = ['.mp4', '.mov', '.webm', '.avi', '.mkv'];
-    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+    const newItems: SelectedFileItem[] = [];
 
-    if (!validExtensions.includes(ext)) {
-      setUploadError(`Unsupported format '${ext}'. Allowed: MP4, MOV, WebM.`);
-      return;
+    Array.from(files).forEach((file) => {
+      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+      if (!validExtensions.includes(ext)) {
+        setUploadError(`Unsupported format for '${file.name}'. Allowed: MP4, MOV, WebM.`);
+        return;
+      }
+      if (file.size > 250 * 1024 * 1024) {
+        setUploadError(`File '${file.name}' is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum is 250 MB.`);
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      newItems.push({
+        file,
+        id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
+        previewUrl: url,
+        status: 'pending'
+      });
+    });
+
+    if (newItems.length > 0) {
+      setSelectedFiles((prev) => [...prev, ...newItems]);
     }
-
-    // 250 MB client limit
-    if (file.size > 250 * 1024 * 1024) {
-      setUploadError(`File is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum allowed is 250 MB.`);
-      return;
-    }
-
-    setSelectedFile(file);
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFileSelect(e.dataTransfer.files[0]);
+      addFiles(e.dataTransfer.files);
     }
   };
 
-  const handleRemoveFile = () => {
-    setSelectedFile(null);
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
+  const handleRemoveFile = (id: string) => {
+    setSelectedFiles((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((item) => item.id !== id);
+    });
   };
 
-  // Step 3: Server Upload & OpenCV Validation
-  const handleUploadAndValidate = async () => {
-    if (!selectedFile || !projectId) return;
+  // Step 3: Batch Upload & OpenCV Validation
+  const handleBatchUpload = async () => {
+    if (selectedFiles.length === 0 || !projectId) return;
 
     setIsUploading(true);
     setUploadProgress(0);
     setUploadError(null);
 
     const formData = new FormData();
-    formData.append('file', selectedFile);
+    selectedFiles.forEach((item) => {
+      formData.append('files', item.file);
+    });
 
     try {
-      const res = await api.post(`/projects/${projectId}/videos`, formData, {
+      const res = await api.post(`/projects/${projectId}/videos/batch`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
@@ -139,11 +163,25 @@ export const ProjectWizard: React.FC = () => {
         },
       });
 
-      setUploadedVideo(res.data);
-      setActiveStep(3); // advance to Review & Reconstruct
+      const batchResults = res.data.results || [];
+      const successfulUploads = batchResults
+        .filter((r: any) => r.status === 'success' && r.video)
+        .map((r: any) => r.video);
+
+      setUploadedVideos(successfulUploads);
+
+      // Check if any failed
+      const failures = batchResults.filter((r: any) => r.status === 'error');
+      if (failures.length > 0) {
+        setUploadError(`Some files encountered validation errors: ${failures.map((f: any) => `${f.filename}: ${f.error}`).join('; ')}`);
+      }
+
+      if (successfulUploads.length > 0) {
+        setActiveStep(3); // advance to Review & Reconstruct
+      }
     } catch (err: any) {
       const detail = err.response?.data?.detail;
-      setUploadError(typeof detail === 'string' ? detail : 'Video upload failed. Check format or connection.');
+      setUploadError(typeof detail === 'string' ? detail : 'Batch video upload failed. Check file sizes or format.');
     } finally {
       setIsUploading(false);
     }
@@ -247,92 +285,89 @@ export const ProjectWizard: React.FC = () => {
             <CardContent sx={{ p: 4 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                 <Typography variant="h6" sx={{ fontWeight: 700, color: '#14243A' }}>
-                  Step 2: Select Walkthrough Video
+                  Step 2: Select Walkthrough Video(s)
                 </Typography>
                 <Chip size="small" label={`Project: ${projectName}`} sx={{ backgroundColor: 'rgba(22, 184, 166, 0.15)', color: '#16B8A6', fontWeight: 600 }} />
               </Box>
               <Typography variant="body2" sx={{ color: '#64748B', mb: 3 }}>
-                Upload an MP4, MOV, or WebM indoor walking video (max 250 MB).
+                Upload one or multiple MP4, MOV, or WebM indoor walking videos (max 250 MB each).
               </Typography>
 
               {uploadError && <Alert severity="error" sx={{ mb: 3 }}>{uploadError}</Alert>}
 
-              {!selectedFile ? (
-                /* Drag & Drop Area */
-                <Box
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={handleDrop}
-                  sx={{
-                    border: '2px dashed #94A3B8',
-                    borderRadius: 3,
-                    p: 6,
-                    textAlign: 'center',
-                    backgroundColor: '#F8FAFC',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    '&:hover': { borderColor: '#16B8A6', backgroundColor: 'rgba(22, 184, 166, 0.04)' },
+              {/* Drag & Drop Area */}
+              <Box
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
+                sx={{
+                  border: '2px dashed #94A3B8',
+                  borderRadius: 3,
+                  p: 5,
+                  textAlign: 'center',
+                  backgroundColor: '#F8FAFC',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  '&:hover': { borderColor: '#16B8A6', backgroundColor: 'rgba(22, 184, 166, 0.04)' },
+                }}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  type="file"
+                  multiple
+                  ref={fileInputRef}
+                  accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      addFiles(e.target.files);
+                    }
                   }}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files.length > 0) {
-                        handleFileSelect(e.target.files[0]);
-                      }
-                    }}
-                  />
-                  <Box sx={{ width: 56, height: 56, borderRadius: '50%', backgroundColor: 'rgba(22, 184, 166, 0.1)', color: '#16B8A6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
-                    <UploadCloud size={30} />
-                  </Box>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#14243A' }}>
-                    Drag & Drop your walkthrough video here
-                  </Typography>
-                  <Typography variant="body2" sx={{ color: '#64748B', mt: 0.5 }}>
-                    or click to browse local files on your device
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mt: 1.5 }}>
-                    Supported: MP4, MOV, WebM &bull; Maximum file size: 250 MB
-                  </Typography>
+                />
+                <Box sx={{ width: 56, height: 56, borderRadius: '50%', backgroundColor: 'rgba(22, 184, 166, 0.1)', color: '#16B8A6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
+                  <UploadCloud size={30} />
                 </Box>
-              ) : (
-                /* Selected File Preview Box */
-                <Box sx={{ border: '1px solid #CBD5E1', borderRadius: 3, p: 3, backgroundColor: '#FFFFFF' }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                      <FileVideo size={24} color="#16B8A6" />
-                      <Box>
-                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#14243A' }}>
-                          {selectedFile.name}
-                        </Typography>
-                        <Typography variant="caption" sx={{ color: '#64748B' }}>
-                          {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB &bull; {selectedFile.type || 'Video Stream'}
-                        </Typography>
-                      </Box>
-                    </Box>
-                    <Button
-                      size="small"
-                      color="error"
-                      startIcon={<X size={16} />}
-                      onClick={handleRemoveFile}
-                    >
-                      Remove
-                    </Button>
-                  </Box>
+                <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#14243A' }}>
+                  Drag & Drop single or multiple walkthrough videos here
+                </Typography>
+                <Typography variant="body2" sx={{ color: '#64748B', mt: 0.5 }}>
+                  or click to browse local files on your device (Batch uploads supported)
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mt: 1.5 }}>
+                  Supported: MP4, MOV, WebM &bull; Maximum file size: 250 MB per video
+                </Typography>
+              </Box>
 
-                  {/* HTML5 Video Preview Player */}
-                  {previewUrl && (
-                    <Box sx={{ mt: 2, borderRadius: 2, overflow: 'hidden', backgroundColor: '#000000', maxHeight: 300, display: 'flex', justifyContent: 'center' }}>
-                      <video
-                        src={previewUrl}
-                        controls
-                        style={{ maxWidth: '100%', maxHeight: 300, outline: 'none' }}
-                      />
-                    </Box>
-                  )}
+              {/* Selected Files List */}
+              {selectedFiles.length > 0 && (
+                <Box sx={{ mt: 3 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#14243A', mb: 1 }}>
+                    Selected Files for Batch Upload ({selectedFiles.length})
+                  </Typography>
+                  <List sx={{ border: '1px solid #E2E8F0', borderRadius: 2, p: 0, overflow: 'hidden' }}>
+                    {selectedFiles.map((item, idx) => (
+                      <ListItem
+                        key={item.id}
+                        sx={{
+                          borderBottom: idx < selectedFiles.length - 1 ? '1px solid #F1F5F9' : 'none',
+                          backgroundColor: '#FFFFFF',
+                          py: 1.5
+                        }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 40 }}>
+                          <FileVideo size={22} color="#16B8A6" />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={<span style={{ fontWeight: 600, color: '#14243A' }}>{item.file.name}</span>}
+                          secondary={`${(item.file.size / (1024 * 1024)).toFixed(2)} MB • ${item.file.type || 'video stream'}`}
+                        />
+                        <ListItemSecondaryAction>
+                          <IconButton size="small" onClick={() => handleRemoveFile(item.id)} sx={{ color: '#EF4444' }}>
+                            <X size={16} />
+                          </IconButton>
+                        </ListItemSecondaryAction>
+                      </ListItem>
+                    ))}
+                  </List>
                 </Box>
               )}
 
@@ -346,15 +381,15 @@ export const ProjectWizard: React.FC = () => {
                 </Button>
                 <Button
                   variant="contained"
-                  disabled={!selectedFile}
+                  disabled={selectedFiles.length === 0}
                   onClick={() => {
                     setActiveStep(2);
-                    handleUploadAndValidate();
+                    handleBatchUpload();
                   }}
                   endIcon={<ArrowRight size={18} />}
                   sx={{ backgroundColor: '#14243A', px: 3, py: 1.2, fontWeight: 700, '&:hover': { backgroundColor: '#23395B' } }}
                 >
-                  Proceed to Upload & Validate
+                  Proceed to Upload & Validate ({selectedFiles.length} File{selectedFiles.length > 1 ? 's' : ''})
                 </Button>
               </Box>
             </CardContent>
@@ -369,34 +404,20 @@ export const ProjectWizard: React.FC = () => {
                 Step 3: Uploading & Server-Side OpenCV Validation
               </Typography>
               <Typography variant="body2" sx={{ color: '#64748B', mb: 4 }}>
-                Streaming actual video to storage and verifying decoder compatibility...
+                Streaming video chunks to storage and verifying decoder compatibility...
               </Typography>
 
-              {uploadError ? (
-                <Box>
-                  <Alert severity="error" sx={{ mb: 3, textAlign: 'left' }}>
-                    {uploadError}
-                  </Alert>
-                  <Button
-                    variant="outlined"
-                    startIcon={<RefreshCw size={16} />}
-                    onClick={handleUploadAndValidate}
-                    sx={{ mr: 2 }}
-                  >
-                    Retry Upload
-                  </Button>
-                  <Button
-                    onClick={() => setActiveStep(1)}
-                    sx={{ color: '#64748B' }}
-                  >
-                    Select Different File
-                  </Button>
-                </Box>
-              ) : (
+              {uploadError && (
+                <Alert severity="error" sx={{ mb: 3, textAlign: 'left' }}>
+                  {uploadError}
+                </Alert>
+              )}
+
+              {isUploading ? (
                 <Box sx={{ maxWidth: 500, mx: 'auto', py: 4 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                     <Typography variant="caption" sx={{ fontWeight: 600, color: '#14243A' }}>
-                      {uploadProgress < 100 ? 'Uploading to Server...' : 'Executing OpenCV Codec Verification...'}
+                      {uploadProgress < 100 ? 'Uploading Video Chunks to Server...' : 'Executing OpenCV Codec Verification...'}
                     </Typography>
                     <Typography variant="caption" sx={{ fontWeight: 700, color: '#16B8A6' }}>
                       {uploadProgress}%
@@ -410,6 +431,23 @@ export const ProjectWizard: React.FC = () => {
                   <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mt: 2 }}>
                     OpenCV checks frame headers, duration, and stream integrity before queueing AI models.
                   </Typography>
+                </Box>
+              ) : (
+                <Box sx={{ mt: 2 }}>
+                  <Button
+                    variant="outlined"
+                    startIcon={<RefreshCw size={16} />}
+                    onClick={handleBatchUpload}
+                    sx={{ mr: 2 }}
+                  >
+                    Retry Batch Upload
+                  </Button>
+                  <Button
+                    onClick={() => setActiveStep(1)}
+                    sx={{ color: '#64748B' }}
+                  >
+                    Select Different Files
+                  </Button>
                 </Box>
               )}
             </CardContent>
@@ -432,38 +470,21 @@ export const ProjectWizard: React.FC = () => {
 
               {/* Extracted Metadata Grid */}
               <Grid container spacing={2} sx={{ mb: 4 }}>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ p: 2, backgroundColor: '#F8FAFC', borderRadius: 2, border: '1px solid #E2E8F0' }}>
-                    <Typography variant="caption" sx={{ color: '#64748B', display: 'block' }}>Resolution</Typography>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#14243A' }}>
-                      {uploadedVideo?.width && uploadedVideo?.height ? `${uploadedVideo.width} × ${uploadedVideo.height}` : 'HD / Auto'}
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ p: 2, backgroundColor: '#F8FAFC', borderRadius: 2, border: '1px solid #E2E8F0' }}>
-                    <Typography variant="caption" sx={{ color: '#64748B', display: 'block' }}>Duration</Typography>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#14243A' }}>
-                      {uploadedVideo?.duration ? `${uploadedVideo.duration} sec` : 'Verified'}
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ p: 2, backgroundColor: '#F8FAFC', borderRadius: 2, border: '1px solid #E2E8F0' }}>
-                    <Typography variant="caption" sx={{ color: '#64748B', display: 'block' }}>Frame Rate</Typography>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#14243A' }}>
-                      {uploadedVideo?.fps ? `${uploadedVideo.fps} FPS` : '30.0 FPS'}
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ p: 2, backgroundColor: '#F8FAFC', borderRadius: 2, border: '1px solid #E2E8F0' }}>
-                    <Typography variant="caption" sx={{ color: '#64748B', display: 'block' }}>Format / Size</Typography>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#14243A' }}>
-                      {uploadedVideo?.format || 'MP4'} &bull; {uploadedVideo?.file_size ? `${(uploadedVideo.file_size / (1024 * 1024)).toFixed(1)} MB` : ''}
-                    </Typography>
-                  </Box>
-                </Grid>
+                {uploadedVideos.map((vid, idx) => (
+                  <Grid item xs={12} sm={uploadedVideos.length > 1 ? 6 : 12} key={vid.id || idx}>
+                    <Box sx={{ p: 2, backgroundColor: '#F8FAFC', borderRadius: 2, border: '1px solid #E2E8F0' }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#14243A' }}>
+                          {vid.filename}
+                        </Typography>
+                        <Chip size="small" label="OpenCV Verified" color="success" sx={{ fontSize: '0.7rem' }} />
+                      </Box>
+                      <Typography variant="caption" sx={{ color: '#64748B', display: 'block' }}>
+                        Resolution: <b>{vid.width && vid.height ? `${vid.width} × ${vid.height}` : 'HD / Auto'}</b> &bull; Duration: <b>{vid.duration ? `${vid.duration}s` : 'Verified'}</b> &bull; FPS: <b>{vid.fps ? `${vid.fps}` : '30.0'}</b>
+                      </Typography>
+                    </Box>
+                  </Grid>
+                ))}
               </Grid>
 
               <Alert severity="info" sx={{ mb: 4, borderRadius: 2 }}>
@@ -475,7 +496,7 @@ export const ProjectWizard: React.FC = () => {
                   onClick={() => setActiveStep(1)}
                   sx={{ color: '#64748B' }}
                 >
-                  Upload Different Video
+                  Upload More Videos
                 </Button>
 
                 <Button

@@ -2,14 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Box, Typography, Button, IconButton, Tooltip, Card, CardContent,
   TextField, Select, MenuItem, FormControl, InputLabel, Alert,
-  Chip, CircularProgress, Divider, Stack
+  Chip, CircularProgress, Divider, Stack, Dialog, DialogTitle,
+  DialogContent, DialogActions, List, ListItem, ListItemText
 } from '@mui/material';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import {
   ZoomIn, ZoomOut, Maximize2, Grid, MousePointer, Plus,
   DoorOpen, Tag, Trash2, Undo2, Redo2, Save, RotateCcw,
-  Box as CubeIcon, Download, AlertTriangle, Check
+  Box as CubeIcon, Download, AlertTriangle, Check, History, RotateCw
 } from 'lucide-react';
 
 interface Wall {
@@ -47,6 +48,16 @@ interface Bounds {
   height: number;
 }
 
+interface VersionItem {
+  id: string;
+  version_number: number;
+  revision_name?: string;
+  created_at: string;
+  created_by?: string;
+  restored_from_version?: number;
+  is_preliminary?: boolean;
+}
+
 type ToolMode = 'select' | 'add_wall' | 'add_door' | 'add_room';
 
 export const MapEditor: React.FC = () => {
@@ -60,6 +71,13 @@ export const MapEditor: React.FC = () => {
   const [versionNumber, setVersionNumber] = useState(1);
   const [isPreliminary, setIsPreliminary] = useState(true);
   const [uncertaintyNotes, setUncertaintyNotes] = useState('');
+
+  // Version history modal state
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versionsList, setVersionsList] = useState<VersionItem[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
+  const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
 
   // Geometry state
   const [walls, setWalls] = useState<Wall[]>([]);
@@ -120,6 +138,33 @@ export const MapEditor: React.FC = () => {
       setError(err.response?.data?.detail || 'No floor plan available yet for this project.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchVersions = async () => {
+    try {
+      setLoadingVersions(true);
+      const res = await api.get(`/projects/${projectId}/versions`);
+      setVersionsList(res.data);
+    } catch (err: any) {
+      console.error('Failed to load map versions', err);
+    } finally {
+      setLoadingVersions(false);
+    }
+  };
+
+  const handleRestoreVersion = async (targetVersion: number) => {
+    try {
+      setRestoringVersion(targetVersion);
+      const res = await api.post(`/projects/${projectId}/versions/${targetVersion}/restore`);
+      setRestoreSuccess(`Restored version v${targetVersion} successfully as new revision v${res.data.version_number}`);
+      await loadMapData();
+      await fetchVersions();
+      setTimeout(() => setRestoreSuccess(null), 4000);
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to restore map version.');
+    } finally {
+      setRestoringVersion(null);
     }
   };
 
@@ -384,6 +429,19 @@ export const MapEditor: React.FC = () => {
             sx={{ backgroundColor: '#16B8A6', fontWeight: 700, '&:hover': { backgroundColor: '#0F766E' } }}
           >
             {saving ? 'Saving...' : 'Save Revision'}
+          </Button>
+
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<History size={15} />}
+            onClick={() => {
+              setVersionsOpen(true);
+              fetchVersions();
+            }}
+            sx={{ color: '#14243A', borderColor: '#CBD5E1', fontWeight: 600 }}
+          >
+            Versions ({versionNumber})
           </Button>
 
           <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
@@ -920,6 +978,96 @@ export const MapEditor: React.FC = () => {
         </Box>
 
       </Box>
+
+      {/* Map Version History Modal */}
+      <Dialog
+        open={versionsOpen}
+        onClose={() => setVersionsOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700, color: '#14243A', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Map Revision History</span>
+          <Chip size="small" label={`Active: v${versionNumber}`} sx={{ backgroundColor: '#14243A', color: '#FFFFFF', fontWeight: 700 }} />
+        </DialogTitle>
+        <DialogContent dividers>
+          {restoreSuccess && (
+            <Alert severity="success" sx={{ mb: 2 }}>{restoreSuccess}</Alert>
+          )}
+
+          {loadingVersions ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+              <CircularProgress sx={{ color: '#16B8A6' }} />
+            </Box>
+          ) : versionsList.length === 0 ? (
+            <Typography variant="body2" sx={{ color: '#64748B', py: 3, textAlign: 'center' }}>
+              No version history available for this floor plan.
+            </Typography>
+          ) : (
+            <List sx={{ p: 0 }}>
+              {versionsList.map((ver) => (
+                <ListItem
+                  key={ver.id}
+                  sx={{
+                    border: '1px solid #E2E8F0',
+                    borderRadius: 2,
+                    mb: 1.5,
+                    backgroundColor: ver.version_number === versionNumber ? 'rgba(22, 184, 166, 0.05)' : '#FFFFFF',
+                    borderColor: ver.version_number === versionNumber ? '#16B8A6' : '#E2E8F0',
+                    display: 'flex',
+                    flexDirection: { xs: 'column', sm: 'row' },
+                    alignItems: { xs: 'flex-start', sm: 'center' },
+                    justifyContent: 'space-between',
+                    gap: 1.5,
+                    p: 2
+                  }}
+                >
+                  <Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#14243A' }}>
+                        Version {ver.version_number}: {ver.revision_name || `Revision v${ver.version_number}`}
+                      </Typography>
+                      {ver.version_number === versionNumber && (
+                        <Chip size="small" label="CURRENT" color="primary" sx={{ fontSize: '0.65rem', height: 20 }} />
+                      )}
+                      {ver.restored_from_version && (
+                        <Chip size="small" label={`Restored from v${ver.restored_from_version}`} sx={{ fontSize: '0.65rem', height: 20, backgroundColor: '#FEF3C7', color: '#B45309' }} />
+                      )}
+                    </Box>
+                    <Typography variant="caption" sx={{ color: '#64748B', display: 'block' }}>
+                      Created: {new Date(ver.created_at).toLocaleString()}
+                      {ver.created_by && ` • By ${ver.created_by}`}
+                    </Typography>
+                  </Box>
+
+                  <Button
+                    size="small"
+                    variant={ver.version_number === versionNumber ? 'outlined' : 'contained'}
+                    disabled={ver.version_number === versionNumber || restoringVersion === ver.version_number}
+                    onClick={() => handleRestoreVersion(ver.version_number)}
+                    startIcon={restoringVersion === ver.version_number ? <CircularProgress size={14} /> : <RotateCw size={14} />}
+                    sx={{
+                      backgroundColor: ver.version_number === versionNumber ? 'transparent' : '#14243A',
+                      color: ver.version_number === versionNumber ? '#94A3B8' : '#FFFFFF',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      whiteSpace: 'nowrap',
+                      '&:hover': { backgroundColor: '#23395B' }
+                    }}
+                  >
+                    {restoringVersion === ver.version_number ? 'Restoring...' : ver.version_number === versionNumber ? 'Active' : 'Restore'}
+                  </Button>
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setVersionsOpen(false)} sx={{ color: '#64748B' }}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

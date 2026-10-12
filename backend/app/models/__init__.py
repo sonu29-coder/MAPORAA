@@ -17,6 +17,8 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
+    role = Column(String(32), default="surveyor", nullable=False)  # "surveyor" or "admin"
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
@@ -30,6 +32,7 @@ class Project(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
+    status = Column(String(32), default="ACTIVE", nullable=False)  # ACTIVE, ARCHIVED, COMPLETED
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
@@ -53,6 +56,8 @@ class Video(Base):
     height = Column(Integer, nullable=True)
     fps = Column(Float, nullable=True)
     format = Column(String(32), nullable=True)
+    status = Column(String(32), default="READY", nullable=False)  # READY, PROCESSING, FAILED
+    storage_type = Column(String(32), default="local", nullable=False)  # local, s3
     created_at = Column(DateTime(timezone=True), default=utc_now)
 
     project = relationship("Project", back_populates="videos")
@@ -103,9 +108,12 @@ class MapVersion(Base):
     project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     version_number = Column(Integer, default=1)
     revision_name = Column(String(128), default="Initial Reconstruction")
+    created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    restored_from_version = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
 
     project = relationship("Project", back_populates="map_versions")
+    creator = relationship("User", foreign_keys=[created_by])
     geometry = relationship("MapGeometry", back_populates="map_version", uselist=False, cascade="all, delete-orphan")
 
 

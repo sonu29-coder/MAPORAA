@@ -99,12 +99,29 @@ export const Navbar: React.FC = () => {
                     py: 0.5,
                     borderRadius: 1.5,
                     backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                    display: { xs: 'none', md: 'block' },
+                    display: { xs: 'none', md: 'flex' },
+                    alignItems: 'center',
+                    gap: 1
                   }}
                 >
                   <Typography variant="caption" sx={{ color: '#94A3B8' }}>
-                    Signed in as: <b style={{ color: '#F1F5F9' }}>{user.email}</b>
+                    <b style={{ color: '#F1F5F9' }}>{user.full_name || user.email}</b>
                   </Typography>
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: '4px',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      backgroundColor: user.role === 'admin' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(22, 184, 166, 0.2)',
+                      color: user.role === 'admin' ? '#F59E0B' : '#16B8A6',
+                      border: `1px solid ${user.role === 'admin' ? 'rgba(245, 158, 11, 0.4)' : 'rgba(22, 184, 166, 0.4)'}`
+                    }}
+                  >
+                    {user.role}
+                  </span>
                 </Box>
 
                 <Button

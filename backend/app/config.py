@@ -25,6 +25,17 @@ class Settings(BaseModel):
     MAX_UPLOAD_SIZE_MB: int = 250
     ALLOWED_EXTENSIONS: List[str] = [".mp4", ".mov", ".webm", ".avi", ".mkv"]
     
+    # Initial Admin Bootstrap
+    ADMIN_EMAIL: str = os.getenv("ADMIN_EMAIL", "admin@maporaa.io")
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "AdminSecret2026!")
+    ADMIN_FULL_NAME: str = os.getenv("ADMIN_FULL_NAME", "System Administrator")
+
+    # Optional S3 Storage
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
+    AWS_S3_BUCKET: str = os.getenv("AWS_S3_BUCKET", "")
+    
     # CORS
     CORS_ORIGINS: List[str] = [
         "http://localhost:5173",

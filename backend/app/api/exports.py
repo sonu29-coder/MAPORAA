@@ -9,7 +9,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import Project, MapVersion, ExportRecord, User
 from app.schemas import ExportRequest, ExportResponse
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, verify_project_ownership
 from app.utils.exporter import generate_pdf_report
 from app.pipeline.pipeline_runner import generate_svg_floorplan
 
@@ -22,9 +22,11 @@ def create_export(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+
+    verify_project_ownership(project, current_user)
 
     latest_ver = db.query(MapVersion).filter(MapVersion.project_id == project_id).order_by(MapVersion.version_number.desc()).first()
     if not latest_ver or not latest_ver.geometry:
@@ -134,9 +136,11 @@ def get_export_info(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found.")
 
-    project = db.query(Project).filter(Project.id == record.project_id, Project.user_id == current_user.id).first()
+    project = db.query(Project).filter(Project.id == record.project_id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated project not found.")
+
+    verify_project_ownership(project, current_user)
 
     return ExportResponse(
         id=record.id,
@@ -159,9 +163,11 @@ def download_export(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found.")
 
-    project = db.query(Project).filter(Project.id == record.project_id, Project.user_id == current_user.id).first()
+    project = db.query(Project).filter(Project.id == record.project_id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated project not found.")
+
+    verify_project_ownership(project, current_user)
 
     file_path = Path(record.filepath)
     if not file_path.exists():

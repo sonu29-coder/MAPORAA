@@ -378,10 +378,14 @@ def run_pipeline(job_id: str, db_factory):
         existing_version = db.query(MapVersion).filter(MapVersion.project_id == job.project_id).order_by(MapVersion.version_number.desc()).first()
         next_ver_num = (existing_version.version_number + 1) if existing_version else 1
         
+        project_rec = db.query(Project).filter(Project.id == job.project_id).first()
+        creator_id = project_rec.user_id if project_rec else None
+
         map_ver = MapVersion(
             project_id=job.project_id,
             version_number=next_ver_num,
-            revision_name=f"Reconstruction v{next_ver_num} (AI Pipeline)"
+            revision_name=f"Reconstruction v{next_ver_num} (AI Pipeline)",
+            created_by=creator_id
         )
         db.add(map_ver)
         db.flush()

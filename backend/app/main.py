@@ -1,14 +1,53 @@
 from pathlib import Path
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from app.config import settings
-from app.database import engine, Base
-from app.api import auth, projects, videos, reconstructions, maps, exports
+from sqlalchemy.orm import Session
 
-# Initialize database tables
-Base.metadata.create_all(bind=engine)
+from app.config import settings
+from app.database import engine, Base, SessionLocal, init_db_schema
+from app.models import User
+from app.utils.security import get_password_hash
+from app.api import auth, projects, videos, reconstructions, maps, exports, admin
+
+# Initialize database tables and columns
+init_db_schema()
+
+def bootstrap_admin_user():
+    """Initializes the secure default administrator account if configured."""
+    if not settings.ADMIN_EMAIL or not settings.ADMIN_PASSWORD:
+        return
+    
+    db: Session = SessionLocal()
+    try:
+        clean_email = settings.ADMIN_EMAIL.strip().lower()
+        admin_user = db.query(User).filter(User.email == clean_email).first()
+        if not admin_user:
+            admin_user = User(
+                email=clean_email,
+                hashed_password=get_password_hash(settings.ADMIN_PASSWORD),
+                full_name=settings.ADMIN_FULL_NAME,
+                role="admin",
+                is_active=True
+            )
+            db.add(admin_user)
+            db.commit()
+        else:
+            if admin_user.role != "admin":
+                admin_user.role = "admin"
+                admin_user.is_active = True
+                db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    bootstrap_admin_user()
+    yield
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -16,7 +55,8 @@ app = FastAPI(
     description="MAPORAA: AI-Based Indoor Map Generation from a Single Camera Walkthrough Video",
     openapi_url="/api/v1/openapi.json",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # CORS configuration
@@ -30,6 +70,7 @@ app.add_middleware(
 
 # Register API v1 routes
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
+app.include_router(admin.router, prefix=settings.API_V1_PREFIX)
 app.include_router(projects.router, prefix=settings.API_V1_PREFIX)
 app.include_router(videos.router, prefix=settings.API_V1_PREFIX)
 app.include_router(reconstructions.router, prefix=settings.API_V1_PREFIX)

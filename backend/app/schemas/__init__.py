@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 EMAIL_REGEX = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
 
-# --- Auth Schemas ---
+# --- Auth & User Schemas ---
 class UserCreate(BaseModel):
     email: str = Field(..., pattern=EMAIL_REGEX)
     password: str = Field(..., min_length=6)
@@ -18,7 +18,24 @@ class UserResponse(BaseModel):
     id: str
     email: str
     full_name: Optional[str] = None
+    role: str = "surveyor"  # "surveyor" or "admin"
+    is_active: bool = True
     created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+class UserAdminUpdate(BaseModel):
+    role: Optional[str] = Field(None, pattern="^(admin|surveyor)$")
+    is_active: Optional[bool] = None
+    full_name: Optional[str] = None
+
+class UserAdminView(BaseModel):
+    id: str
+    email: str
+    full_name: Optional[str] = None
+    role: str
+    is_active: bool
+    created_at: datetime
+    project_count: int = 0
     model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
@@ -38,6 +55,7 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
+    status: Optional[str] = Field(None, pattern="^(ACTIVE|ARCHIVED|COMPLETED)$")
 
 class VideoResponse(BaseModel):
     id: str
@@ -49,8 +67,21 @@ class VideoResponse(BaseModel):
     height: Optional[int] = None
     fps: Optional[float] = None
     format: Optional[str] = None
+    status: str = "READY"
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+class BatchVideoItemResult(BaseModel):
+    filename: str
+    success: bool
+    video: Optional[VideoResponse] = None
+    error: Optional[str] = None
+
+class BatchVideoUploadResponse(BaseModel):
+    total: int
+    succeeded: int
+    failed: int
+    results: List[BatchVideoItemResult]
 
 class ProcessingStageResponse(BaseModel):
     id: str
@@ -82,14 +113,18 @@ class ProjectResponse(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    status: str = "ACTIVE"
+    user_id: str
+    owner_email: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     videos: List[VideoResponse] = []
+    map_versions_count: int = 0
     latest_reconstruction: Optional[ReconstructionResponse] = None
     model_config = ConfigDict(from_attributes=True)
 
 
-# --- Map Geometry Schemas ---
+# --- Map Geometry & Version Schemas ---
 class WallItem(BaseModel):
     id: str
     x1: float
@@ -122,6 +157,8 @@ class MapGeometryResponse(BaseModel):
     map_version_id: str
     version_number: int = 1
     revision_name: str = "Initial Reconstruction"
+    restored_from_version: Optional[int] = None
+    created_by: Optional[str] = None
     walls: List[WallItem] = []
     doors: List[DoorItem] = []
     rooms: List[RoomItem] = []
@@ -141,6 +178,21 @@ class MapGeometryUpdate(BaseModel):
     bounds: Optional[Dict[str, Any]] = None
     is_preliminary: Optional[bool] = False
     uncertainty_notes: Optional[str] = None
+
+class MapVersionSummary(BaseModel):
+    id: str
+    project_id: str
+    version_number: int
+    revision_name: str
+    created_by: Optional[str] = None
+    creator_email: Optional[str] = None
+    restored_from_version: Optional[int] = None
+    walls_count: int = 0
+    doors_count: int = 0
+    rooms_count: int = 0
+    is_preliminary: bool = True
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Export Schemas ---

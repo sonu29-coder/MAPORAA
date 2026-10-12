@@ -5,6 +5,8 @@ export interface User {
   id: string;
   email: string;
   full_name?: string;
+  role: 'surveyor' | 'admin';
+  is_active: boolean;
   created_at: string;
 }
 
@@ -48,7 +50,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    try {
+      api.post('/auth/logout').catch(() => {});
+    } catch {
+      // ignore
+    }
     localStorage.removeItem('maporaa_token');
+    localStorage.removeItem('maporaa_user');
     setToken(null);
     setUser(null);
   };

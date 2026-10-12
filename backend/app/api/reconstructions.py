@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, SessionLocal
 from app.models import Project, Video, ReconstructionJob, ProcessingStage, User
 from app.schemas import ReconstructionResponse
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, verify_project_ownership
 from app.pipeline.pipeline_runner import run_pipeline, STAGE_DEFINITIONS
 
 router = APIRouter(tags=["Reconstructions"])
@@ -18,9 +18,11 @@ def start_reconstruction(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+
+    verify_project_ownership(project, current_user)
 
     latest_video = db.query(Video).filter(Video.project_id == project_id).order_by(Video.created_at.desc()).first()
     if not latest_video:
@@ -72,9 +74,11 @@ def get_reconstruction_status(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reconstruction job not found.")
 
     # Authorization
-    project = db.query(Project).filter(Project.id == job.project_id, Project.user_id == current_user.id).first()
+    project = db.query(Project).filter(Project.id == job.project_id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated project not found.")
+
+    verify_project_ownership(project, current_user)
 
     return ReconstructionResponse.model_validate(job)
 
@@ -89,9 +93,11 @@ def retry_reconstruction(
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reconstruction job not found.")
 
-    project = db.query(Project).filter(Project.id == job.project_id, Project.user_id == current_user.id).first()
+    project = db.query(Project).filter(Project.id == job.project_id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated project not found.")
+
+    verify_project_ownership(project, current_user)
 
     # Reset stages
     for stage in job.stages:
