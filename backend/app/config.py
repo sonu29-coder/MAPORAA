@@ -21,6 +21,7 @@ class Settings(BaseModel):
     # Uploads & Artifacts
     UPLOAD_DIR: Path = BASE_DIR / "uploads"
     ARTIFACT_DIR: Path = BASE_DIR / "artifacts"
+    FRONTEND_DIST: Path = BASE_DIR.parent / "frontend" / "dist"
     MAX_UPLOAD_SIZE_MB: int = 250
     ALLOWED_EXTENSIONS: List[str] = [".mp4", ".mov", ".webm", ".avi", ".mkv"]
     
